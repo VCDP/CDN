@@ -1,0 +1,17 @@
+diff --git a/libavformat/rtmpproto.c b/libavformat/rtmpproto.c
+index b741e42..6fcf755 100644
+--- a/libavformat/rtmpproto.c
++++ b/libavformat/rtmpproto.c
+@@ -2425,6 +2425,12 @@ static int get_packet(URLContext *s, int for_header)
+             }
+         }
+ 
++        if (rpkt.timestamp < rt->last_timestamp)
++        {
++            ff_rtmp_packet_destroy(&rpkt);
++            return AVERROR_EOF;
++        }
++
+         // Track timestamp for later use
+         rt->last_timestamp = rpkt.timestamp;
+ 

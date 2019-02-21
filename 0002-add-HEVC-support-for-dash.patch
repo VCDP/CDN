@@ -1,0 +1,238 @@
+From 02329de21ecc62a7ab062538e61050fdab9475a6 Mon Sep 17 00:00:00 2001
+From: dlin2 <decai.lin@intel.com>
+Date: Mon, 7 Jan 2019 19:20:47 +0800
+Subject: [PATCH 2/2] add HEVC support for dash
+
+---
+ dash/ngx_rtmp_dash_module.c | 19 ++++++------
+ dash/ngx_rtmp_mp4.c         | 75 +++++++++++++++++++++++++++++++++++++++------
+ 2 files changed, 75 insertions(+), 19 deletions(-)
+
+diff --git a/dash/ngx_rtmp_dash_module.c b/dash/ngx_rtmp_dash_module.c
+index 81bc343..0bc6e20 100644
+--- a/dash/ngx_rtmp_dash_module.c
++++ b/dash/ngx_rtmp_dash_module.c
+@@ -277,9 +277,9 @@ ngx_rtmp_dash_write_playlist(ngx_rtmp_session_t *s)
+     "        maxHeight=\"%ui\"\n"                                              \
+     "        maxFrameRate=\"%ui\">\n"                                          \
+     "      <Representation\n"                                                  \
+-    "          id=\"%V_H264\"\n"                                               \
++    "          id=\"%V_%s\"\n"                                               \
+     "          mimeType=\"video/mp4\"\n"                                       \
+-    "          codecs=\"avc1.%02uxi%02uxi%02uxi\"\n"                           \
++    "          codecs=\"%s.%02uxi%02uxi%02uxi\"\n"                           \
+     "          width=\"%ui\"\n"                                                \
+     "          height=\"%ui\"\n"                                               \
+     "          frameRate=\"%ui\"\n"                                            \
+@@ -291,7 +291,6 @@ ngx_rtmp_dash_write_playlist(ngx_rtmp_session_t *s)
+     "            initialization=\"%V%sinit.m4v\">\n"                           \
+     "          <SegmentTimeline>\n"
+ 
+-
+ #define NGX_RTMP_DASH_MANIFEST_VIDEO_FOOTER                                    \
+     "          </SegmentTimeline>\n"                                           \
+     "        </SegmentTemplate>\n"                                             \
+@@ -377,6 +376,8 @@ ngx_rtmp_dash_write_playlist(ngx_rtmp_session_t *s)
+                          codec_ctx->height,
+                          codec_ctx->frame_rate,
+                          &ctx->name,
++                         (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H264) ? "H264" : "H265",
++                         (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H264) ? "avc1" : "hvc1",
+                          codec_ctx->avc_profile,
+                          codec_ctx->avc_compat,
+                          codec_ctx->avc_level,
+@@ -1154,7 +1155,7 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+     ngx_chain_t *in)
+ {
+     u_char                    *p;
+-    uint8_t                    ftype, htype;
++    uint8_t                    ftype, ctype, htype;
+     uint32_t                   delay;
+     ngx_rtmp_dash_ctx_t       *ctx;
+     ngx_rtmp_codec_ctx_t      *codec_ctx;
+@@ -1170,9 +1171,8 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+         return NGX_OK;
+     }
+ 
+-    /* Only H264 is supported */
+-
+-    if (codec_ctx->video_codec_id != NGX_RTMP_VIDEO_H264) {
++    /* Only AVC/HEVC are supported */
++    if (codec_ctx->video_codec_id != NGX_RTMP_VIDEO_H264 && codec_ctx->video_codec_id != NGX_RTMP_VIDEO_H265) {
+         return NGX_OK;
+     }
+ 
+@@ -1181,8 +1181,9 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+     }
+ 
+     ftype = (in->buf->pos[0] & 0xf0) >> 4;
++    ctype = (in->buf->pos[0] & 0x0f);
+ 
+-    /* skip AVC config */
++    /* skip AVC/HEVC config */
+ 
+     htype = in->buf->pos[1];
+     if (htype != 1) {
+@@ -1198,7 +1199,7 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+ 
+     ctx->has_video = 1;
+ 
+-    /* skip RTMP & H264 headers */
++    /* skip RTMP & AVC/HEVC headers */
+ 
+     in->buf->pos += 5;
+ 
+diff --git a/dash/ngx_rtmp_mp4.c b/dash/ngx_rtmp_mp4.c
+index dd680c9..2fbe895 100644
+--- a/dash/ngx_rtmp_mp4.c
++++ b/dash/ngx_rtmp_mp4.c
+@@ -237,7 +237,7 @@ ngx_rtmp_mp4_write_mvhd(ngx_buf_t *b)
+ 
+     pos = ngx_rtmp_mp4_start_box(b, "mvhd");
+ 
+-    /* version */
++    /* version & flags */
+     ngx_rtmp_mp4_field_32(b, 0);
+ 
+     /* creation time */
+@@ -344,7 +344,7 @@ ngx_rtmp_mp4_write_mdhd(ngx_buf_t *b)
+ 
+     pos = ngx_rtmp_mp4_start_box(b, "mdhd");
+ 
+-    /* version */
++    /* version & flags*/
+     ngx_rtmp_mp4_field_32(b, 0);
+ 
+     /* creation time */
+@@ -534,6 +534,50 @@ ngx_rtmp_mp4_write_avcc(ngx_rtmp_session_t *s, ngx_buf_t *b)
+     return NGX_OK;
+ }
+ 
++static ngx_int_t
++ngx_rtmp_mp4_write_hvcc(ngx_rtmp_session_t *s, ngx_buf_t *b)
++{
++    u_char                *pos, *p;
++    ngx_chain_t           *in;
++    ngx_rtmp_codec_ctx_t  *codec_ctx;
++
++    codec_ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_codec_module);
++
++    if (codec_ctx == NULL) {
++        return NGX_ERROR;
++    }
++
++    in = codec_ctx->avc_header;
++    if (in == NULL) {
++        return NGX_ERROR;
++    }
++
++    pos = ngx_rtmp_mp4_start_box(b, "hvcC");
++
++    /* assume config fits one chunk (highly probable) */
++
++    /*
++     * Skip:
++     * - flv fmt
++     * - H265 CONF/PICT (0x00)
++     * - 0
++     * - 0
++     * - 0
++     */
++
++    p = in->buf->pos + 5;
++
++    if (p < in->buf->last) {
++        ngx_rtmp_mp4_data(b, p, (size_t) (in->buf->last - p));
++    } else {
++        ngx_log_error(NGX_LOG_ERR, s->connection->log, ngx_errno,
++                      "dash: invalid hvcc received");
++    }
++
++    ngx_rtmp_mp4_update_box_size(b, pos);
++
++    return NGX_OK;
++}
+ 
+ static ngx_int_t
+ ngx_rtmp_mp4_write_video(ngx_rtmp_session_t *s, ngx_buf_t *b)
+@@ -543,7 +587,11 @@ ngx_rtmp_mp4_write_video(ngx_rtmp_session_t *s, ngx_buf_t *b)
+ 
+     codec_ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_codec_module);
+ 
+-    pos = ngx_rtmp_mp4_start_box(b, "avc1");
++    if (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H265) {
++        pos = ngx_rtmp_mp4_start_box(b, "hvc1");
++    } else {
++        pos = ngx_rtmp_mp4_start_box(b, "avc1");
++    }
+ 
+     /* reserved */
+     ngx_rtmp_mp4_field_32(b, 0);
+@@ -589,7 +637,11 @@ ngx_rtmp_mp4_write_video(ngx_rtmp_session_t *s, ngx_buf_t *b)
+     ngx_rtmp_mp4_field_16(b, 0x18);
+     ngx_rtmp_mp4_field_16(b, 0xffff);
+ 
+-    ngx_rtmp_mp4_write_avcc(s, b);
++    if (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H265) {
++        ngx_rtmp_mp4_write_hvcc(s, b);
++    } else {
++        ngx_rtmp_mp4_write_avcc(s, b);
++    }
+ 
+     ngx_rtmp_mp4_update_box_size(b, pos);
+ 
+@@ -760,7 +812,7 @@ ngx_rtmp_mp4_write_stts(ngx_buf_t *b)
+ 
+     pos = ngx_rtmp_mp4_start_box(b, "stts");
+ 
+-    ngx_rtmp_mp4_field_32(b, 0); /* version */
++    ngx_rtmp_mp4_field_32(b, 0); /* version & flags*/
+     ngx_rtmp_mp4_field_32(b, 0); /* entry count */
+ 
+     ngx_rtmp_mp4_update_box_size(b, pos);
+@@ -776,7 +828,7 @@ ngx_rtmp_mp4_write_stsc(ngx_buf_t *b)
+ 
+     pos = ngx_rtmp_mp4_start_box(b, "stsc");
+ 
+-    ngx_rtmp_mp4_field_32(b, 0); /* version */
++    ngx_rtmp_mp4_field_32(b, 0); /* version & flags*/
+     ngx_rtmp_mp4_field_32(b, 0); /* entry count */
+ 
+     ngx_rtmp_mp4_update_box_size(b, pos);
+@@ -792,9 +844,9 @@ ngx_rtmp_mp4_write_stsz(ngx_buf_t *b)
+ 
+     pos = ngx_rtmp_mp4_start_box(b, "stsz");
+ 
+-    ngx_rtmp_mp4_field_32(b, 0); /* version */
+-    ngx_rtmp_mp4_field_32(b, 0); /* entry count */
+-    ngx_rtmp_mp4_field_32(b, 0); /* moar zeros */
++    ngx_rtmp_mp4_field_32(b, 0); /* version & flags*/
++    ngx_rtmp_mp4_field_32(b, 0); /* sample size */
++    ngx_rtmp_mp4_field_32(b, 0); /* sample count */
+ 
+     ngx_rtmp_mp4_update_box_size(b, pos);
+ 
+@@ -809,7 +861,7 @@ ngx_rtmp_mp4_write_stco(ngx_buf_t *b)
+ 
+     pos = ngx_rtmp_mp4_start_box(b, "stco");
+ 
+-    ngx_rtmp_mp4_field_32(b, 0); /* version */
++    ngx_rtmp_mp4_field_32(b, 0); /* version & flags*/
+     ngx_rtmp_mp4_field_32(b, 0); /* entry count */
+ 
+     ngx_rtmp_mp4_update_box_size(b, pos);
+@@ -1020,8 +1072,11 @@ ngx_rtmp_mp4_write_trun(ngx_buf_t *b, uint32_t sample_count,
+ 
+     offset = (pos - moof_pos) + 20 + (sample_count * nitems * 4) + 8;
+ 
++    /* version & flags */
+     ngx_rtmp_mp4_field_32(b, flags);
++    /* sample count */
+     ngx_rtmp_mp4_field_32(b, sample_count);
++    /* data offset */
+     ngx_rtmp_mp4_field_32(b, offset);
+ 
+     for (i = 0; i < sample_count; i++, samples++) {
+-- 
+1.8.3.1
+

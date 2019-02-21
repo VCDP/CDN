@@ -1,22 +1,22 @@
-From 004862b008aa494c147dd4edc55849fabbb798e5 Mon Sep 17 00:00:00 2001
-From: dlin2 <decai.lin@intel.com>
-Date: Mon, 7 Jan 2019 14:40:18 +0800
+From fcc3824f8bf7d438ec002c223d38462396d40725 Mon Sep 17 00:00:00 2001
+From: Decai Lin <decai.lin@intel.com>
+Date: Fri, 22 Feb 2019 00:18:56 +0800
 Subject: [PATCH 1/2] add hevc support for rtmp and hls
 
 ---
- hls/ngx_rtmp_hls_module.c | 318 ++++++++++++++++++++++++++++++++++++----------
- hls/ngx_rtmp_mpegts.c     |  65 ++++++++--
+ hls/ngx_rtmp_hls_module.c | 315 ++++++++++++++++++++++++++++++++++++----------
+ hls/ngx_rtmp_mpegts.c     |  65 +++++++---
  hls/ngx_rtmp_mpegts.h     |   1 +
  ngx_rtmp.h                |   6 +
  ngx_rtmp_bitop.c          |  24 ++++
  ngx_rtmp_bitop.h          |   1 +
- ngx_rtmp_codec_module.c   | 107 ++++++++++++++++
+ ngx_rtmp_codec_module.c   | 104 +++++++++++++++
  ngx_rtmp_codec_module.h   |   3 +-
  ngx_rtmp_live_module.c    |   3 +-
- 9 files changed, 444 insertions(+), 84 deletions(-)
+ 9 files changed, 439 insertions(+), 83 deletions(-)
 
 diff --git a/hls/ngx_rtmp_hls_module.c b/hls/ngx_rtmp_hls_module.c
-index 25166cb..5b0cd52 100644
+index 25166cb..61242f0 100644
 --- a/hls/ngx_rtmp_hls_module.c
 +++ b/hls/ngx_rtmp_hls_module.c
 @@ -10,6 +10,7 @@
@@ -57,7 +57,7 @@ index 25166cb..5b0cd52 100644
      return NGX_OK;
  }
  
-@@ -791,6 +798,96 @@ ngx_rtmp_hls_append_sps_pps(ngx_rtmp_session_t *s, ngx_buf_t *out)
+@@ -791,6 +798,94 @@ ngx_rtmp_hls_append_sps_pps(ngx_rtmp_session_t *s, ngx_buf_t *out)
  }
  
  
@@ -69,9 +69,8 @@ index 25166cb..5b0cd52 100644
 +    u_char                         *p;
 +    ngx_chain_t                    *in;
 +    ngx_rtmp_hls_ctx_t             *ctx;
-+    int8_t                          narrs, src_nal_type, nal_type;
++    int8_t                          narrs, src_nal_type;
 +    uint16_t                        len, rlen, nnals, rnnals;
-+    ngx_int_t                       n;
 +
 +    ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_hls_module);
 +
@@ -104,7 +103,6 @@ index 25166cb..5b0cd52 100644
 +        if (ngx_rtmp_hls_copy(s, &src_nal_type, &p, 1, &in) != NGX_OK) {
 +            return NGX_ERROR;
 +        }
-+        nal_type = src_nal_type & 0x3f;
 +
 +        /* NAL nums*/
 +        if (ngx_rtmp_hls_copy(s, &rnnals, &p, 2, &in) != NGX_OK) {
@@ -154,7 +152,7 @@ index 25166cb..5b0cd52 100644
  static uint64_t
  ngx_rtmp_hls_get_fragment_id(ngx_rtmp_session_t *s, uint64_t ts)
  {
-@@ -850,6 +947,8 @@ ngx_rtmp_hls_open_fragment(ngx_rtmp_session_t *s, uint64_t ts,
+@@ -850,6 +945,8 @@ ngx_rtmp_hls_open_fragment(ngx_rtmp_session_t *s, uint64_t ts,
      ngx_rtmp_hls_ctx_t       *ctx;
      ngx_rtmp_hls_frag_t      *f;
      ngx_rtmp_hls_app_conf_t  *hacf;
@@ -163,7 +161,7 @@ index 25166cb..5b0cd52 100644
  
      ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_hls_module);
  
-@@ -943,6 +1042,9 @@ ngx_rtmp_hls_open_fragment(ngx_rtmp_session_t *s, uint64_t ts,
+@@ -943,6 +1040,9 @@ ngx_rtmp_hls_open_fragment(ngx_rtmp_session_t *s, uint64_t ts,
          return NGX_ERROR;
      }
  
@@ -173,7 +171,7 @@ index 25166cb..5b0cd52 100644
      if (ngx_rtmp_mpegts_open_file(&ctx->file, ctx->stream.data,
                                    s->connection->log)
          != NGX_OK)
-@@ -1835,7 +1937,7 @@ ngx_rtmp_hls_audio(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+@@ -1835,7 +1935,7 @@ ngx_rtmp_hls_audio(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
      return NGX_OK;
  }
  
@@ -182,16 +180,7 @@ index 25166cb..5b0cd52 100644
  static ngx_int_t
  ngx_rtmp_hls_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
      ngx_chain_t *in)
-@@ -1844,7 +1946,7 @@ ngx_rtmp_hls_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
-     ngx_rtmp_hls_ctx_t             *ctx;
-     ngx_rtmp_codec_ctx_t           *codec_ctx;
-     u_char                         *p;
--    uint8_t                         fmt, ftype, htype, nal_type, src_nal_type;
-+    uint8_t                         fmt, ftype, codec_type, htype, nal_type, src_nal_type;
-     uint32_t                        len, rlen;
-     ngx_buf_t                       out, *b;
-     uint32_t                        cts;
-@@ -1852,6 +1954,7 @@ ngx_rtmp_hls_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+@@ -1852,6 +1952,7 @@ ngx_rtmp_hls_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
      ngx_uint_t                      nal_bytes;
      ngx_int_t                       aud_sent, sps_pps_sent, boundary;
      static u_char                   buffer[NGX_RTMP_HLS_BUFSIZE];
@@ -199,7 +188,7 @@ index 25166cb..5b0cd52 100644
  
      hacf = ngx_rtmp_get_module_app_conf(s, ngx_rtmp_hls_module);
  
-@@ -1865,8 +1968,8 @@ ngx_rtmp_hls_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+@@ -1865,8 +1966,8 @@ ngx_rtmp_hls_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
          return NGX_OK;
      }
  
@@ -210,15 +199,7 @@ index 25166cb..5b0cd52 100644
          return NGX_OK;
      }
  
-@@ -1880,6 +1983,7 @@ ngx_rtmp_hls_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
-      * 3: disposable inter frame */
- 
-     ftype = (fmt & 0xf0) >> 4;
-+    codec_type = (fmt & 0x0f);
- 
-     /* H264 HDR/PICT */
- 
-@@ -1925,87 +2029,167 @@ ngx_rtmp_hls_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+@@ -1925,87 +2026,169 @@ ngx_rtmp_hls_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
              continue;
          }
  
@@ -261,6 +242,8 @@ index 25166cb..5b0cd52 100644
 +                            ngx_log_error(NGX_LOG_ERR, s->connection->log, 0,
 +                                          "hls: error appending AUD NAL");
 +                        }
++			aud_sent = 1;
++                        break;
 +                    case 9:
 +                        aud_sent = 1;
 +                        break;
@@ -650,7 +633,7 @@ index c954a35..49e569c 100644
  void ngx_rtmp_bit_init_reader(ngx_rtmp_bit_reader_t *br, u_char *pos,
      u_char *last);
 diff --git a/ngx_rtmp_codec_module.c b/ngx_rtmp_codec_module.c
-index ddc9273..7588cae 100644
+index ddc9273..9e1c0e1 100644
 --- a/ngx_rtmp_codec_module.c
 +++ b/ngx_rtmp_codec_module.c
 @@ -30,12 +30,16 @@ static void ngx_rtmp_codec_parse_aac_header(ngx_rtmp_session_t *s,
@@ -710,7 +693,7 @@ index ddc9273..7588cae 100644
      }
  
      if (header == NULL) {
-@@ -533,6 +549,97 @@ ngx_rtmp_codec_parse_avc_header(ngx_rtmp_session_t *s, ngx_chain_t *in)
+@@ -533,6 +549,94 @@ ngx_rtmp_codec_parse_avc_header(ngx_rtmp_session_t *s, ngx_chain_t *in)
  }
  
  
@@ -718,8 +701,7 @@ index ddc9273..7588cae 100644
 +static void
 +ngx_rtmp_codec_parse_hevc_header(ngx_rtmp_session_t *s, ngx_chain_t *in)
 +{
-+    ngx_uint_t              profile_idc, width, height ;
-+    ngx_uint_t              i, j, narrs, nal_type, nnal, nnall;
++    ngx_uint_t              i, j, narrs, nnal, nnall;
 +    ngx_rtmp_codec_ctx_t   *ctx;
 +    ngx_rtmp_bit_reader_t   br;
 +
@@ -781,9 +763,7 @@ index ddc9273..7588cae 100644
 +    //parse vps sps pps ..
 +    for ( j = 0; j < narrs; j++) {
 +        //bit(1) array_completeness;
-+        nal_type = (ngx_uint_t)ngx_rtmp_bit_read_8(&br) & 0x3f;
 +        nnal = (ngx_uint_t)ngx_rtmp_bit_read_16(&br);
-+        ngx_log_debug2(NGX_LOG_DEBUG_RTMP, s->connection->log, 0, "codec: hevc nal_type=%ui nnal=%ui", nal_type, nnal);
 +        for (i = 0; i < nnal; i++) {
 +            nnall = (ngx_uint_t)ngx_rtmp_bit_read_16(&br);
 +            ngx_rtmp_bit_read(&br, nnall*8);

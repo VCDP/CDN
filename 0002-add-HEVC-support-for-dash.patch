@@ -1,15 +1,15 @@
-From 02329de21ecc62a7ab062538e61050fdab9475a6 Mon Sep 17 00:00:00 2001
-From: dlin2 <decai.lin@intel.com>
-Date: Mon, 7 Jan 2019 19:20:47 +0800
-Subject: [PATCH 2/2] add HEVC support for dash
+From 325a56c3a688655c375a1875698da71ae7eef2f7 Mon Sep 17 00:00:00 2001
+From: Decai Lin <decai.lin@intel.com>
+Date: Fri, 22 Feb 2019 00:20:04 +0800
+Subject: [PATCH 2/2] Add HEVC support for Dash
 
 ---
- dash/ngx_rtmp_dash_module.c | 19 ++++++------
+ dash/ngx_rtmp_dash_module.c | 16 +++++-----
  dash/ngx_rtmp_mp4.c         | 75 +++++++++++++++++++++++++++++++++++++++------
- 2 files changed, 75 insertions(+), 19 deletions(-)
+ 2 files changed, 73 insertions(+), 18 deletions(-)
 
 diff --git a/dash/ngx_rtmp_dash_module.c b/dash/ngx_rtmp_dash_module.c
-index 81bc343..0bc6e20 100644
+index 81bc343..db5a3a5 100644
 --- a/dash/ngx_rtmp_dash_module.c
 +++ b/dash/ngx_rtmp_dash_module.c
 @@ -277,9 +277,9 @@ ngx_rtmp_dash_write_playlist(ngx_rtmp_session_t *s)
@@ -41,15 +41,6 @@ index 81bc343..0bc6e20 100644
                           codec_ctx->avc_profile,
                           codec_ctx->avc_compat,
                           codec_ctx->avc_level,
-@@ -1154,7 +1155,7 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
-     ngx_chain_t *in)
- {
-     u_char                    *p;
--    uint8_t                    ftype, htype;
-+    uint8_t                    ftype, ctype, htype;
-     uint32_t                   delay;
-     ngx_rtmp_dash_ctx_t       *ctx;
-     ngx_rtmp_codec_ctx_t      *codec_ctx;
 @@ -1170,9 +1171,8 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
          return NGX_OK;
      }
@@ -62,18 +53,16 @@ index 81bc343..0bc6e20 100644
          return NGX_OK;
      }
  
-@@ -1181,8 +1181,9 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
-     }
+@@ -1182,7 +1182,7 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
  
      ftype = (in->buf->pos[0] & 0xf0) >> 4;
-+    ctype = (in->buf->pos[0] & 0x0f);
  
 -    /* skip AVC config */
 +    /* skip AVC/HEVC config */
  
      htype = in->buf->pos[1];
      if (htype != 1) {
-@@ -1198,7 +1199,7 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+@@ -1198,7 +1198,7 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
  
      ctx->has_video = 1;
  

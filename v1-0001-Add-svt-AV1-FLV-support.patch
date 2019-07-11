@@ -1,20 +1,35 @@
-From ae59c698ea48f06b3e3f3a0089d3cc1c95c23e4c Mon Sep 17 00:00:00 2001
-From: Decai Lin <decai.lin@intel.com>
-Date: Tue, 26 Feb 2019 16:29:41 +0800
-Subject: [PATCH v1 1/1] Add svt AV1 FLV support.
+From 669fa50ead2bacc31dcda991de358d564c87c56d Mon Sep 17 00:00:00 2001
+From: Zhizhen Tang <zhizhen.tang@intel.com>
+Date: Thu, 11 Jul 2019 16:50:59 +0800
+Subject: [PATCH] Add svt AV1 FLV support
 
 Signed-off-by: Decai Lin <decai.lin@intel.com>
+Signed-off-by: Zhizhen Tang <zhizhen.tang@intel.com>
 ---
+ libavformat/av1.c    |  2 ++
  libavformat/flv.h    |  1 +
- libavformat/flvdec.c | 12 ++++++++++--
- libavformat/flvenc.c | 38 +++++++++++++++++++++++++++++---------
- 3 files changed, 40 insertions(+), 11 deletions(-)
+ libavformat/flvdec.c | 12 +++++++++--
+ libavformat/flvenc.c | 48 ++++++++++++++++++++++++++++++++++++--------
+ 4 files changed, 53 insertions(+), 10 deletions(-)
 
+diff --git a/libavformat/av1.c b/libavformat/av1.c
+index a0aad43..8d9b242 100644
+--- a/libavformat/av1.c
++++ b/libavformat/av1.c
+@@ -372,6 +372,8 @@ int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size)
+     put_bits(&pbc, 1, seq_params.chroma_subsampling_x);
+     put_bits(&pbc, 1, seq_params.chroma_subsampling_y);
+     put_bits(&pbc, 2, seq_params.chroma_sample_position);
++    put_bits(&pbc, 2, seq_size - 1);
++    put_bits(&pbc, 6, 0); // padding
+     flush_put_bits(&pbc);
+
+     avio_write(pb, header, sizeof(header));
 diff --git a/libavformat/flv.h b/libavformat/flv.h
-index 91f0065..22faf26 100644
+index 97324cc..c1064dc 100644
 --- a/libavformat/flv.h
 +++ b/libavformat/flv.h
-@@ -111,6 +111,7 @@ enum {
+@@ -110,6 +110,7 @@ enum {
      FLV_CODECID_REALH263= 8,
      FLV_CODECID_MPEG4   = 9,
      FLV_CODECID_HEVC    = 12,
@@ -23,10 +38,10 @@ index 91f0065..22faf26 100644
  
  enum {
 diff --git a/libavformat/flvdec.c b/libavformat/flvdec.c
-index 141110e..f645277 100644
+index db3cd5b..90c53d0 100644
 --- a/libavformat/flvdec.c
 +++ b/libavformat/flvdec.c
-@@ -321,6 +321,8 @@ static int flv_same_video_codec(AVCodecParameters *vpar, int flags)
+@@ -295,6 +295,8 @@ static int flv_same_video_codec(AVCodecParameters *vpar, int flags)
          return vpar->codec_id == AV_CODEC_ID_H264;
      case FLV_CODECID_HEVC:
          return vpar->codec_id == AV_CODEC_ID_HEVC;
@@ -35,7 +50,7 @@ index 141110e..f645277 100644
      default:
          return vpar->codec_tag == flv_codecid;
      }
-@@ -375,6 +377,11 @@ static int flv_set_video_codec(AVFormatContext *s, AVStream *vstream,
+@@ -349,6 +351,11 @@ static int flv_set_video_codec(AVFormatContext *s, AVStream *vstream,
          vstream->need_parsing = AVSTREAM_PARSE_NONE;
          ret = 3; // not 4, reading packet type will consume one byte
          break;
@@ -47,7 +62,7 @@ index 141110e..f645277 100644
      default:
          avpriv_request_sample(s, "Video codec (%x)", flv_codecid);
          par->codec_tag = flv_codecid;
-@@ -1231,6 +1238,7 @@ retry_duration:
+@@ -1165,6 +1172,7 @@ retry_duration:
      if (st->codecpar->codec_id == AV_CODEC_ID_AAC ||
          st->codecpar->codec_id == AV_CODEC_ID_H264 ||
          st->codecpar->codec_id == AV_CODEC_ID_HEVC ||
@@ -55,7 +70,7 @@ index 141110e..f645277 100644
          st->codecpar->codec_id == AV_CODEC_ID_MPEG4) {
          int type = avio_r8(s->pb);
          size--;
-@@ -1241,7 +1249,7 @@ retry_duration:
+@@ -1175,7 +1183,7 @@ retry_duration:
          }
  
          if (st->codecpar->codec_id == AV_CODEC_ID_H264 || st->codecpar->codec_id == AV_CODEC_ID_HEVC
@@ -64,7 +79,7 @@ index 141110e..f645277 100644
              // sign extension
              int32_t cts = (avio_rb24(s->pb) + 0xff800000) ^ 0xff800000;
              pts = dts + cts;
-@@ -1257,7 +1265,7 @@ retry_duration:
+@@ -1191,7 +1199,7 @@ retry_duration:
              }
          }
          if (type == 0 && (!st->codecpar->extradata || st->codecpar->codec_id == AV_CODEC_ID_AAC ||
@@ -74,18 +89,18 @@ index 141110e..f645277 100644
  
              if (st->codecpar->extradata) {
 diff --git a/libavformat/flvenc.c b/libavformat/flvenc.c
-index aa87dc8..f7e2d1f 100644
+index e1e664a..4c88801 100644
 --- a/libavformat/flvenc.c
 +++ b/libavformat/flvenc.c
-@@ -27,6 +27,7 @@
- #include "avio_internal.h"
+@@ -28,6 +28,7 @@
  #include "avio.h"
  #include "avc.h"
+ #include "hevc.h"
 +#include "av1.h"
  #include "avformat.h"
  #include "flv.h"
  #include "internal.h"
-@@ -47,6 +48,7 @@ static const AVCodecTag flv_video_codec_ids[] = {
+@@ -48,6 +49,7 @@ static const AVCodecTag flv_video_codec_ids[] = {
      { AV_CODEC_ID_VP6A,     FLV_CODECID_VP6A },
      { AV_CODEC_ID_H264,     FLV_CODECID_H264 },
      { AV_CODEC_ID_HEVC,     FLV_CODECID_HEVC },
@@ -93,7 +108,26 @@ index aa87dc8..f7e2d1f 100644
      { AV_CODEC_ID_NONE,     0 }
  };
  
-@@ -491,8 +493,11 @@ static void flv_write_codec_header(AVFormatContext* s, AVCodecParameters* par, i
+@@ -262,6 +264,18 @@ static void put_hevc_eos_tag(AVIOContext *pb, unsigned ts)
+     avio_wb32(pb, 16);              /* Size of FLV tag */
+ }
+
++static void put_av1_eos_tag(AVIOContext *pb, unsigned ts)
++{
++    avio_w8(pb, FLV_TAG_TYPE_VIDEO);
++    avio_wb24(pb, 5);               /* Tag Data Size */
++    put_timestamp(pb, ts);
++    avio_wb24(pb, 0);               /* StreamId = 0 */
++    avio_w8(pb, 29);                /* ub[4] FrameType = 1, ub[4] CodecId = 13 */
++    avio_w8(pb, 2);                 /* AV1 end of sequence */
++    avio_wb24(pb, 0);               /* Always 0 for AV1 EOS. */
++    avio_wb32(pb, 16);              /* Size of FLV tag */
++}
++
+ static void put_amf_double(AVIOContext *pb, double d)
+ {
+     avio_w8(pb, AMF_DATA_TYPE_NUMBER);
+@@ -504,8 +518,11 @@ static void flv_write_codec_header(AVFormatContext* s, AVCodecParameters* par, i
      AVIOContext *pb = s->pb;
      FLVContext *flv = s->priv_data;
  
@@ -107,7 +141,7 @@ index aa87dc8..f7e2d1f 100644
          int64_t pos;
          avio_w8(pb,
                  par->codec_type == AVMEDIA_TYPE_VIDEO ?
-@@ -538,7 +543,9 @@ static void flv_write_codec_header(AVFormatContext* s, AVCodecParameters* par, i
+@@ -551,7 +568,9 @@ static void flv_write_codec_header(AVFormatContext* s, AVCodecParameters* par, i
              avio_w8(pb, par->codec_tag | FLV_FRAME_KEY); // flags
              avio_w8(pb, 0); // AVC sequence header
              avio_wb24(pb, 0); // composition time
@@ -118,18 +152,16 @@ index aa87dc8..f7e2d1f 100644
                  ff_isom_write_hvcc(pb, par->extradata, par->extradata_size, 0);
              } else {
                  ff_isom_write_avcc(pb, par->extradata, par->extradata_size);
-@@ -845,7 +852,9 @@ end:
-             AVCodecParameters *par = s->streams[i]->codecpar;
-             FLVStreamContext *sc = s->streams[i]->priv_data;
-             if (par->codec_type == AVMEDIA_TYPE_VIDEO &&
--                    (par->codec_id == AV_CODEC_ID_H264 || par->codec_id == AV_CODEC_ID_HEVC ||  par->codec_id == AV_CODEC_ID_MPEG4))
-+                    (par->codec_id == AV_CODEC_ID_H264 ||
-+                     par->codec_id == AV_CODEC_ID_HEVC ||
-+                     par->codec_id == AV_CODEC_ID_MPEG4))
-                 put_avc_eos_tag(pb, sc->last_ts);
+@@ -862,6 +881,8 @@ end:
+                     put_avc_eos_tag(pb, sc->last_ts);
+                 } else if (par->codec_id == AV_CODEC_ID_HEVC) {
+                     put_hevc_eos_tag(pb, sc->last_ts);
++                } else if (par->codec_id == AV_CODEC_ID_AV1) {
++                    put_av1_eos_tag(pb, sc->last_ts);
+                 }
+             }
          }
-     }
-@@ -896,13 +905,15 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
+@@ -913,13 +934,15 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
      if (par->codec_id == AV_CODEC_ID_VP6F || par->codec_id == AV_CODEC_ID_VP6A ||
          par->codec_id == AV_CODEC_ID_VP6  || par->codec_id == AV_CODEC_ID_AAC)
          flags_size = 2;
@@ -148,7 +180,7 @@ index aa87dc8..f7e2d1f 100644
          int side_size = 0;
          uint8_t *side = av_packet_get_side_data(pkt, AV_PKT_DATA_NEW_EXTRADATA, &side_size);
          if (side && side_size > 0 && (side_size != par->extradata_size || memcmp(side, par->extradata, side_size))) {
-@@ -915,8 +926,8 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
+@@ -932,8 +955,8 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
              memcpy(par->extradata, side, side_size);
              par->extradata_size = side_size;
              flv_write_codec_header(s, par, pkt->dts);
@@ -159,7 +191,7 @@ index aa87dc8..f7e2d1f 100644
          }
      }
  
-@@ -971,6 +982,11 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
+@@ -988,6 +1011,11 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
          if (par->extradata_size > 0 && *(uint8_t*)par->extradata != 1)
              if ((ret = ff_hevc_annexb2mp4_buf(pkt->data, &data, &size, 0, NULL)) < 0)
                  return ret;
@@ -171,7 +203,7 @@ index aa87dc8..f7e2d1f 100644
      } else if (par->codec_id == AV_CODEC_ID_AAC && pkt->size > 2 &&
                 (AV_RB16(pkt->data) & 0xfff0) == 0xfff0) {
          if (!s->streams[pkt->stream_index]->nb_frames) {
-@@ -1045,6 +1061,10 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
+@@ -1062,6 +1090,10 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
          } else if (par->codec_id == AV_CODEC_ID_H264 || par->codec_id == AV_CODEC_ID_HEVC ||  par->codec_id == AV_CODEC_ID_MPEG4) {
              avio_w8(pb, 1); // AVC NALU
              avio_wb24(pb, pkt->pts - pkt->dts);
@@ -183,5 +215,5 @@ index aa87dc8..f7e2d1f 100644
  
          avio_write(pb, data ? data : pkt->data, size);
 -- 
-2.7.4
+2.17.1
 

@@ -1,0 +1,125 @@
+From a3a0402c155c1b03e19dcc15ee7781ddf003372d Mon Sep 17 00:00:00 2001
+From: Zhizhen Tang <zhizhen.tang@intel.com>
+Date: Fri, 12 Jul 2019 10:04:26 +0800
+Subject: [PATCH] Add AV1 support for rtmp on Nginx HTTP FLV
+
+Signed-off-by: Zhizhen Tang <zhizhen.tang@intel.com>
+---
+ ngx_rtmp_codec_module.c | 42 ++++++++++++++++++++++++++++++++++++++---
+ ngx_rtmp_codec_module.h |  3 ++-
+ ngx_rtmp_live_module.c  |  2 +-
+ 3 files changed, 42 insertions(+), 5 deletions(-)
+
+diff --git a/ngx_rtmp_codec_module.c b/ngx_rtmp_codec_module.c
+index bc85b46..8c6897a 100644
+--- a/ngx_rtmp_codec_module.c
++++ b/ngx_rtmp_codec_module.c
+@@ -31,9 +31,10 @@ static ngx_int_t ngx_rtmp_codec_parse_aac_header(ngx_rtmp_session_t *s,
+        ngx_chain_t *in);
+ static ngx_int_t ngx_rtmp_codec_parse_avc_header(ngx_rtmp_session_t *s,
+        ngx_chain_t *in);
+-
+ static void ngx_rtmp_codec_parse_hevc_header(ngx_rtmp_session_t *s,
+        ngx_chain_t *in);
++static void ngx_rtmp_codec_parse_av1_header(ngx_rtmp_session_t *s,
++       ngx_chain_t *in);
+ #if (NGX_DEBUG)
+ static void ngx_rtmp_codec_dump_header(ngx_rtmp_session_t *s, const char *type,
+        ngx_chain_t *in);
+@@ -132,6 +133,7 @@ video_codecs[] = {
+     "",
+     "",
+     "H265",
++    "AV1",
+ };
+ 
+ 
+@@ -240,7 +242,7 @@ ngx_rtmp_codec_av(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+         }
+ 
+     } else {
+-        // parse VideoTagHeader avc=7 hevc=12
++        // parse VideoTagHeader avc=7 hevc=12 av1=13
+         ctx->video_codec_id = (fmt & 0x0f);
+     }
+ 
+@@ -276,7 +278,10 @@ ngx_rtmp_codec_av(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+             header = &ctx->avc_header;
+             ngx_rtmp_codec_parse_hevc_header(s, in);
+         }
+-
++        if (ctx->video_codec_id == NGX_RTMP_VIDEO_AV1) {
++            header = &ctx->avc_header;
++            ngx_rtmp_codec_parse_av1_header(s, in);
++        }
+     }
+ 
+     if (header == NULL) {
+@@ -680,6 +685,37 @@ ngx_rtmp_codec_parse_hevc_header(ngx_rtmp_session_t *s, ngx_chain_t *in)
+                    ctx->width, ctx->height);
+ }
+ 
++static void
++ngx_rtmp_codec_parse_av1_header(ngx_rtmp_session_t *s, ngx_chain_t *in)
++{
++    ngx_rtmp_codec_ctx_t   *ctx;
++    ngx_rtmp_bit_reader_t   br;
++
++#if (NGX_DEBUG)
++    ngx_rtmp_hex_dump(s->connection->log, "ngx_rtmp_codec_parse_av1_header", in->buf->start, in->buf->end);
++    ngx_rtmp_codec_dump_header(s, "ngx_rtmp_codec_parse_av1_header in:", in);
++#endif
++
++    ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_codec_module);
++
++    ngx_rtmp_bit_init_reader(&br, in->buf->pos, in->buf->last);
++
++    //skip tag header and configurationVersion(1 byte)
++    ngx_rtmp_bit_read(&br, 48);
++
++    ctx->avc_profile = (ngx_uint_t)ngx_rtmp_bit_read(&br, 3);
++
++    ctx->avc_level = (ngx_uint_t)ngx_rtmp_bit_read(&br, 5)
++
++    ngx_rtmp_bit_read(&br, 8);
++
++    /* unsigned int(2) lengthSizeMinusOne; */
++    ctx->avc_nal_bytes = (ngx_uint_t)ngx_rtmp_bit_read(&br, 2) + 1;
++
++    ngx_rtmp_bit_read(&br, 6);
++
++    ngx_rtmp_bit_read(&br, ctx->avc_nal_bytes * 8);
++}
+ 
+ 
+ #if (NGX_DEBUG)
+diff --git a/ngx_rtmp_codec_module.h b/ngx_rtmp_codec_module.h
+index f85c98f..e05b25e 100644
+--- a/ngx_rtmp_codec_module.h
++++ b/ngx_rtmp_codec_module.h
+@@ -72,7 +72,8 @@ enum {
+     NGX_RTMP_VIDEO_ON2_VP6_ALPHA    = 5,
+     NGX_RTMP_VIDEO_SCREEN2          = 6,
+     NGX_RTMP_VIDEO_H264             = 7,
+-    NGX_RTMP_VIDEO_H265             = 12
++    NGX_RTMP_VIDEO_H265             = 12,
++    NGX_RTMP_VIDEO_AV1              = 13
+ };
+ 
+ 
+diff --git a/ngx_rtmp_live_module.c b/ngx_rtmp_live_module.c
+index 011cf69..b09b8fc 100644
+--- a/ngx_rtmp_live_module.c
++++ b/ngx_rtmp_live_module.c
+@@ -936,7 +936,7 @@ ngx_rtmp_live_av(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+                 coheader = codec_ctx->aac_header;
+             }
+ 
+-            if ((codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H264 || codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H265) && ngx_rtmp_is_codec_header(in))
++            if ((codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H264 || codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H265 || codec_ctx->video_codec_id == NGX_RTMP_VIDEO_AV1) && ngx_rtmp_is_codec_header(in))
+             {
+                 prio = 0;
+                 mandatory = 1;
+-- 
+2.17.1
+

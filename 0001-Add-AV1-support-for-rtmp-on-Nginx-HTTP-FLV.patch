@@ -79,7 +79,7 @@ index bc85b46..8c6897a 100644
 +
 +    ctx->avc_profile = (ngx_uint_t)ngx_rtmp_bit_read(&br, 3);
 +
-+    ctx->avc_level = (ngx_uint_t)ngx_rtmp_bit_read(&br, 5)
++    ctx->avc_level = (ngx_uint_t)ngx_rtmp_bit_read(&br, 5);
 +
 +    ngx_rtmp_bit_read(&br, 8);
 +

@@ -1,0 +1,114 @@
+From 0a3a13ad0d4af955d3a631eeef1854159922ebaf Mon Sep 17 00:00:00 2001
+From: Zhizhen Tang <zhizhen.tang@intel.com>
+Date: Mon, 29 Jul 2019 10:03:56 +0800
+Subject: [PATCH] Add AV1 support for dash on Nginx HTTP FLV
+
+Signed-off-by: Zhizhen Tang <zhizhen.tang@intel.com>
+---
+ dash/ngx_rtmp_dash_module.c |  8 +++---
+ dash/ngx_rtmp_mp4.c         | 49 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 53 insertions(+), 4 deletions(-)
+
+diff --git a/dash/ngx_rtmp_dash_module.c b/dash/ngx_rtmp_dash_module.c
+index 3369a78..a9d40f5 100644
+--- a/dash/ngx_rtmp_dash_module.c
++++ b/dash/ngx_rtmp_dash_module.c
+@@ -732,8 +732,8 @@ ngx_rtmp_dash_write_variant_playlist(ngx_rtmp_session_t *s)
+ 
+             p = ngx_slprintf(buffer, last, NGX_RTMP_DASH_MANIFEST_REPRESENTATION_VARIANT_VIDEO,
+                              &ctx->varname, &var->suffix,
+-                             (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H264) ? "H264" : "H265",
+-                             (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H264) ? "avc1" : "hvc1",
++                             (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_AV1) ? "AV1" : ((codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H264) ? "H264" : "H265"),
++                             (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_AV1) ? "av01" : ((codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H264) ? "avc1" : "hvc1"),
+                              codec_ctx->avc_profile,
+                              codec_ctx->avc_compat,
+                              codec_ctx->avc_level);
+@@ -2098,8 +2098,8 @@ ngx_rtmp_dash_video(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
+         return NGX_OK;
+     }
+ 
+-    /* Only AVC/HEVC are supported */
+-    if (codec_ctx->video_codec_id != NGX_RTMP_VIDEO_H264 && codec_ctx->video_codec_id != NGX_RTMP_VIDEO_H265) {
++    /* Only AVC/HEVC/AV1 are supported */
++    if (codec_ctx->video_codec_id != NGX_RTMP_VIDEO_H264 && codec_ctx->video_codec_id != NGX_RTMP_VIDEO_H265 && codec_ctx->video_codec_id != NGX_RTMP_VIDEO_AV1) {
+         return NGX_OK;
+     }
+ 
+diff --git a/dash/ngx_rtmp_mp4.c b/dash/ngx_rtmp_mp4.c
+index aa5b4d6..55107c3 100644
+--- a/dash/ngx_rtmp_mp4.c
++++ b/dash/ngx_rtmp_mp4.c
+@@ -798,6 +798,51 @@ ngx_rtmp_mp4_write_hvcc(ngx_rtmp_session_t *s, ngx_buf_t *b)
+     return NGX_OK;
+ }
+ 
++static ngx_int_t
++ngx_rtmp_mp4_write_av1c(ngx_rtmp_session_t *s, ngx_buf_t *b)
++{
++    u_char                *pos, *p;
++    ngx_chain_t           *in;
++    ngx_rtmp_codec_ctx_t  *codec_ctx;
++
++    codec_ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_codec_module);
++
++    if (codec_ctx == NULL) {
++        return NGX_ERROR;
++    }
++
++    in = codec_ctx->avc_header;
++    if (in == NULL) {
++        return NGX_ERROR;
++    }
++
++    pos = ngx_rtmp_mp4_start_box(b, "av1C");
++
++    /* assume config fits one chunk (highly probable) */
++
++    /*
++     * Skip:
++     * - flv fmt
++     * - H264 CONF/PICT (0x00)
++     * - 0
++     * - 0
++     * - 0
++     */
++
++    p = in->buf->pos + 5;
++
++    if (p < in->buf->last) {
++        ngx_rtmp_mp4_data(b, p, (size_t) (in->buf->last - p));
++    } else {
++        ngx_log_error(NGX_LOG_ERR, s->connection->log, ngx_errno,
++                      "dash: invalid av1c received");
++    }
++
++    ngx_rtmp_mp4_update_box_size(b, pos);
++
++    return NGX_OK;
++}
++
+ static ngx_int_t
+ ngx_rtmp_mp4_write_video(ngx_rtmp_session_t *s, ngx_buf_t *b)
+ {
+@@ -808,6 +853,8 @@ ngx_rtmp_mp4_write_video(ngx_rtmp_session_t *s, ngx_buf_t *b)
+ 
+     if (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H265) {
+         pos = ngx_rtmp_mp4_start_box(b, "hvc1");
++    } else if (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_AV1){
++        pos = ngx_rtmp_mp4_start_box(b, "av01");
+     } else {
+         pos = ngx_rtmp_mp4_start_box(b, "avc1");
+     }
+@@ -858,6 +905,8 @@ ngx_rtmp_mp4_write_video(ngx_rtmp_session_t *s, ngx_buf_t *b)
+ 
+     if (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_H265) {
+         ngx_rtmp_mp4_write_hvcc(s, b);
++    } else if (codec_ctx->video_codec_id == NGX_RTMP_VIDEO_AV1) {
++        ngx_rtmp_mp4_write_av1c(s, b);
+     } else {
+         ngx_rtmp_mp4_write_avcc(s, b);
+     }
+-- 
+2.17.1
+

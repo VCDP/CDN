@@ -1,0 +1,25 @@
+From e2d82427ac687bd20215b22a2a55475e37699a44 Mon Sep 17 00:00:00 2001
+From: Tang Zhizhen <zhizhen.tang@intel.com>
+Date: Mon, 9 Sep 2019 02:29:00 +0000
+Subject: [PATCH] Add 2560x1440(Quad HD) definition
+
+Signed-off-by: Tang Zhizhen <zhizhen.tang@intel.com>
+---
+ libavutil/parseutils.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/libavutil/parseutils.c b/libavutil/parseutils.c
+index 59bec6c..e257648 100644
+--- a/libavutil/parseutils.c
++++ b/libavutil/parseutils.c
+@@ -115,6 +115,7 @@ static const VideoSizeAbbr video_size_abbrs[] = {
+     { "2kdci",    2048,1080 },
+     { "2kflat",   1998,1080 },
+     { "2kscope",  2048, 858 },
++    { "2kqhd",    2560,1440 },
+     { "4k",       4096,2160 }, /* Digital Cinema System Specification */
+     { "4kdci",    4096,2160 },
+     { "4kflat",   3996,2160 },
+-- 
+2.17.0
+

@@ -1,7 +1,7 @@
 From a5dc649301239fb47a8ac16f01a0dbef2b00941e Mon Sep 17 00:00:00 2001
 From: Zhizhen Tang <zhizhen.tang@intel.com>
 Date: Thu, 11 Jul 2019 16:29:40 +0800
-Subject: [PATCH] The RTMP protocol extensions for H.265/HEVC
+Subject: [PATCH] Add SVT-HEVC FLV support on FFmpeg
 
 Signed-off-by: Decai Lin <decai.lin@intel.com>
 Signed-off-by: Zhizhen Tang <zhizhen.tang@intel.com>

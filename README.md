@@ -1,1 +1,1 @@
-# Patches for CDN Transcode
+# Patches for CDN-Transcode-Sample

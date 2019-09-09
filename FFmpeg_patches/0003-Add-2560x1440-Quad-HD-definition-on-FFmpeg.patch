@@ -1,7 +1,7 @@
 From e2d82427ac687bd20215b22a2a55475e37699a44 Mon Sep 17 00:00:00 2001
 From: Tang Zhizhen <zhizhen.tang@intel.com>
 Date: Mon, 9 Sep 2019 02:29:00 +0000
-Subject: [PATCH] Add 2560x1440(Quad HD) definition
+Subject: [PATCH] Add 2560x1440(Quad HD) definition on FFmpeg
 
 Signed-off-by: Tang Zhizhen <zhizhen.tang@intel.com>
 ---

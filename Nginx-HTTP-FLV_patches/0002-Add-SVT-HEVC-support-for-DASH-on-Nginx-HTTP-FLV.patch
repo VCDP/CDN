@@ -1,7 +1,7 @@
 From 325a56c3a688655c375a1875698da71ae7eef2f7 Mon Sep 17 00:00:00 2001
 From: Decai Lin <decai.lin@intel.com>
 Date: Fri, 22 Feb 2019 00:20:04 +0800
-Subject: [PATCH 2/2] Add HEVC support for Dash
+Subject: [PATCH] Add SVT-HEVC support for DASH on Nginx HTTP FLV
 
 ---
  dash/ngx_rtmp_dash_module.c | 16 +++++-----

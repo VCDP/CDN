@@ -1,8 +1,7 @@
 From f66601f7231f0a310af133135e24db1b9ea1e8f5 Mon Sep 17 00:00:00 2001
 From: Zhizhen Tang <zhizhen.tang@intel.com>
 Date: Thu, 27 Jun 2019 10:17:06 +0800
-Subject: [PATCH] [PATCH] [PATCH v1 1/1] Add dash ABR mode support on Nginx
- Http Flv  merge from https://github.com/ut0mt8/nginx-rtmp-module/
+Subject: [PATCH] Add SVT-HEVC support for DASH ABR mode on Nginx HTTP FLV
 
 Signed-off-by: Decai Lin <decai.lin@intel.com>
 Signed-off-by: Zhizhen Tang <zhizhen.tang@intel.com>

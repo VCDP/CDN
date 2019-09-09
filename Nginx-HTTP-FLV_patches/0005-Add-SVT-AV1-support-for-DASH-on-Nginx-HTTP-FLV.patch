@@ -1,7 +1,7 @@
 From 0a3a13ad0d4af955d3a631eeef1854159922ebaf Mon Sep 17 00:00:00 2001
 From: Zhizhen Tang <zhizhen.tang@intel.com>
 Date: Mon, 29 Jul 2019 10:03:56 +0800
-Subject: [PATCH] Add AV1 support for dash on Nginx HTTP FLV
+Subject: [PATCH] Add SVT-AV1 support for DASH on Nginx HTTP FLV
 
 Signed-off-by: Zhizhen Tang <zhizhen.tang@intel.com>
 ---

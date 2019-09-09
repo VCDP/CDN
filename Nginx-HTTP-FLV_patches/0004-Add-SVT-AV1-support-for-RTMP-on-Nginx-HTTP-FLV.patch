@@ -1,7 +1,7 @@
 From a3a0402c155c1b03e19dcc15ee7781ddf003372d Mon Sep 17 00:00:00 2001
 From: Zhizhen Tang <zhizhen.tang@intel.com>
 Date: Fri, 12 Jul 2019 10:04:26 +0800
-Subject: [PATCH] Add AV1 support for rtmp on Nginx HTTP FLV
+Subject: [PATCH] Add SVT-AV1 support for RTMP on Nginx HTTP FLV
 
 Signed-off-by: Zhizhen Tang <zhizhen.tang@intel.com>
 ---

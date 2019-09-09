@@ -1,7 +1,7 @@
 From 8078d1c75a5c796e8cd46b76e5e6cfcc8e31d300 Mon Sep 17 00:00:00 2001
 From: Zhizhen Tang <zhizhen.tang@intel.com>
 Date: Wed, 26 Jun 2019 14:42:25 +0800
-Subject: [PATCH] [PATCH 1/2] add hevc support for rtmp and hls on Nginx Http Flv
+Subject: [PATCH] [PATCH 1/2] Add SVT-HEVC support for RTMP and HLS on Nginx HTTP FLV
 
 Signed-off-by: Decai Lin <decai.lin@intel.com>
 Signed-off-by: Zhizhen Tang <zhizhen.tang@intel.com>

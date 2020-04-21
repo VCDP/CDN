@@ -1,39 +1,39 @@
-From ed6c84e88ea27f17b57eeadd57fde1795aa4e1f8 Mon Sep 17 00:00:00 2001
+From a4584112dfd3d7ad130a51f15f8e27c73fedb037 Mon Sep 17 00:00:00 2001
 From: Zhizhen Tang <zhizhen.tang@intel.com>
-Date: Thu, 20 Feb 2020 10:38:50 +0800
+Date: Sun, 26 Apr 2020 22:38:55 +0800
 Subject: [PATCH] Add the "-thread-count" parameter support
 
 Signed-off-by: Zhizhen Tang <zhizhen.tang@intel.com>
 ---
  Config/Sample.cfg                             |  1 +
- Source/API/EbSvtAv1Enc.h                      |  6 ++
+ Source/API/EbSvtAv1Enc.h                      |  6 +++
  Source/App/EncApp/EbAppConfig.c               |  8 ++-
  Source/App/EncApp/EbAppConfig.h               |  1 +
- Source/App/EncApp/EbAppContext.c              | 13 +++++
- Source/Lib/Encoder/Globals/EbEncHandle.c      | 43 ++++++++++----
- ...-ffmpeg-to-run-svt-av1-with-svt-hevc.patch | 57 ++++++++++++-------
- ...dd-ability-for-ffmpeg-to-run-svt-av1.patch | 55 ++++++++++++------
- 8 files changed, 134 insertions(+), 50 deletions(-)
+ Source/App/EncApp/EbAppContext.c              | 12 +++++
+ Source/Lib/Encoder/Globals/EbEncHandle.c      | 39 ++++++++++----
+ ...-ffmpeg-to-run-svt-av1-with-svt-hevc.patch | 54 ++++++++++++-------
+ ...dd-ability-for-ffmpeg-to-run-svt-av1.patch | 52 ++++++++++++------
+ 8 files changed, 126 insertions(+), 47 deletions(-)
 
 diff --git a/Config/Sample.cfg b/Config/Sample.cfg
-index 1bcef823..8fe66f81 100644
+index 36272405..57d9b2fd 100644
 --- a/Config/Sample.cfg
 +++ b/Config/Sample.cfg
-@@ -80,6 +80,7 @@ HmeLevel2SearchAreaInHeight     : 1  1          # Array containing search area h
- Asm                             : max           # Assembly instruction set limit [0 - 11, c, mmx, sse, sse2, sse3, ssse3, sse4_1, sse4_2, avx, avx2, avx512, max]
- LogicalProcessors               : 0             # The number of logical processor which encoder threads run on [0-N] (N is maximum number of logical processor)
- TargetSocket                    : -1            # For dual socket systems, this can specify which socket the encoder runs on (-1=Both Sockets, 0=Socket 0, 1=Socket 1)
-+ThreadCount                     : 0             # The number of threads to get created and run [0-N] (0: Auto, 96: Min)
- #====================== Rate Control ===============================
- RateControlMode                 : 0             # Rate control mode (0: OFF(CQP), 1: ABR, 2: VBR, 3: CVBR)
- TargetBitRate                   : 500           # Target Bit Rate (in kilobits per second)
+@@ -35,6 +35,7 @@ LogicalProcessors               : 1                         # Number of logical
+ UnpinSingleCoreExecution        : 1                         # Allows the execution of multiple encodes on the CPU without having to pin them to a specific( 0: OFF ,1: ON[default]) mask
+ TargetSocket                    : 0                         # Specify  which socket the encoder runs on
+ HighDynamicRangeInput           : 0                         # Enable high dynamic range(0: OFF[default], ON: 1)
++ThreadCount                     : 0                         # The number of threads to get created and run [0-N] (0: Auto, 96: Min)
+ 
+ #=============================== Rate Control Options ===============================
+ RateControlMode                 : 0                         # Rate control mode(0 = CQP , 1 = VBR , 2 = CVBR)
 diff --git a/Source/API/EbSvtAv1Enc.h b/Source/API/EbSvtAv1Enc.h
-index 2cb7da6a..9b65f298 100644
+index c20e3d5e..51f1fdce 100644
 --- a/Source/API/EbSvtAv1Enc.h
 +++ b/Source/API/EbSvtAv1Enc.h
-@@ -18,6 +18,9 @@ extern "C" {
- #define EB_HME_SEARCH_AREA_COLUMN_MAX_COUNT 2
- #define EB_HME_SEARCH_AREA_ROW_MAX_COUNT 2
+@@ -20,6 +20,9 @@ extern "C" {
+ #define MAX_HIERARCHICAL_LEVEL 6
+ #define REF_LIST_MAX_DEPTH 4
  
 +#define EB_THREAD_COUNT_MIN_CORE 48
 +#define EB_THREAD_COUNT_FACTOR 2
@@ -41,21 +41,21 @@ index 2cb7da6a..9b65f298 100644
  #define MAX_ENC_PRESET 8
  
  #define DEFAULT -1
-@@ -495,6 +498,9 @@ typedef struct EbSvtAv1EncConfiguration {
-      * OS thread scheduler. */
-     uint32_t logical_processors;
+@@ -561,6 +564,9 @@ typedef struct EbSvtAv1EncConfiguration {
+     * Default is 1. */
+     uint32_t unpin_lp1;
  
 +    /* The total number of working threads to create. */
 +    uint32_t thread_count;
 +
-     /* Unpin the execution . If logical_processors is set to 1, this option does not
-     * set the execution to be pinned to core #0 when set to 1. this allows the execution
-     * of multiple encodes on the CPU wihtout having to pin them to a specific mask
+     /* Target socket to run on. For dual socket systems, this can specify which
+      * socket the encoder runs on.
+      *
 diff --git a/Source/App/EncApp/EbAppConfig.c b/Source/App/EncApp/EbAppConfig.c
-index fed2f2ff..4970acd6 100644
+index 856552a4..978bf57d 100644
 --- a/Source/App/EncApp/EbAppConfig.c
 +++ b/Source/App/EncApp/EbAppConfig.c
-@@ -138,6 +138,7 @@
+@@ -154,6 +154,7 @@
  #define UNPIN_LP1_TOKEN "-unpin-lp1"
  #define TARGET_SOCKET "-ss"
  #define UNRESTRICTED_MOTION_VECTOR "-umv"
@@ -63,39 +63,39 @@ index fed2f2ff..4970acd6 100644
  #define CONFIG_FILE_COMMENT_CHAR '#'
  #define CONFIG_FILE_NEWLINE_CHAR '\n'
  #define CONFIG_FILE_RETURN_CHAR '\r'
-@@ -565,7 +566,9 @@ static void set_target_socket(const char *value, EbConfig *cfg) {
- static void set_unrestricted_motion_vector(const char *value, EbConfig *cfg) {
+@@ -670,6 +671,10 @@ static void set_unrestricted_motion_vector(const char *value, EbConfig *cfg) {
      cfg->unrestricted_motion_vector = (EbBool)strtol(value, NULL, 0);
  };
--
+ 
 +static void set_thread_count(const char *value, EbConfig *cfg)  {
 +    cfg->thread_count = (uint32_t)strtoul(value, NULL, 0);
-+}; 
++};
++
  static void set_square_weight(const char *value, EbConfig *cfg) {
      cfg->sq_weight = (uint64_t)strtoul(value, NULL, 0);
      if (cfg->sq_weight == 0) cfg->sq_weight = (uint32_t)~0;
-@@ -767,7 +770,7 @@ ConfigEntry config_entry[] = {
+@@ -1103,7 +1108,7 @@ ConfigEntry config_entry_specific[] = {
       UNRESTRICTED_MOTION_VECTOR,
-      "UnrestrictedMotionVector",
+      "Allow motion vectors to reach outside of the picture boundary(O: OFF, 1: ON[default])",
       set_unrestricted_motion_vector},
 -
 +    {SINGLE_INPUT, THREAD_COUNT, "ThreadCount", set_thread_count},
-     //    { SINGLE_INPUT, BITRATE_REDUCTION_TOKEN, "bit_rate_reduction", SetBitRateReduction },
-     {SINGLE_INPUT, HDR_INPUT_TOKEN, "HighDynamicRangeInput", set_high_dynamic_range_input},
+     //{ SINGLE_INPUT, BITRATE_REDUCTION_TOKEN, "bit_rate_reduction", SetBitRateReduction },
      // Latency
-@@ -840,6 +843,7 @@ void eb_config_ctor(EbConfig *config_ptr) {
-     config_ptr->use_qp_file         = EB_FALSE;
-     config_ptr->look_ahead_distance = (uint32_t)~0;
+     {SINGLE_INPUT,
+@@ -1527,6 +1532,7 @@ void eb_config_ctor(EbConfig *config_ptr) {
      config_ptr->target_bit_rate     = 7000000;
-+    config_ptr->thread_count         = 0;
      config_ptr->max_qp_allowed      = 63;
      config_ptr->min_qp_allowed      = 10;
++    config_ptr->thread_count        = 0;
  
+     config_ptr->enable_adaptive_quantization              = 2;
+     config_ptr->enc_mode                                  = MAX_ENC_PRESET;
 diff --git a/Source/App/EncApp/EbAppConfig.h b/Source/App/EncApp/EbAppConfig.h
-index e729cf70..d21e444b 100644
+index d8d573ac..7ac4e995 100644
 --- a/Source/App/EncApp/EbAppConfig.h
 +++ b/Source/App/EncApp/EbAppConfig.h
-@@ -424,6 +424,7 @@ typedef struct EbConfig {
+@@ -453,6 +453,7 @@ typedef struct EbConfig {
      uint32_t channel_id;
      uint32_t active_channel_count;
      uint32_t logical_processors;
@@ -104,49 +104,45 @@ index e729cf70..d21e444b 100644
      int32_t  target_socket;
      EbBool   stop_encoder; // to signal CTRL+C Event, need to stop encoding.
 diff --git a/Source/App/EncApp/EbAppContext.c b/Source/App/EncApp/EbAppContext.c
-index 36294f7d..f97d16f4 100644
+index 1ba9cd7e..6747e72d 100644
 --- a/Source/App/EncApp/EbAppContext.c
 +++ b/Source/App/EncApp/EbAppContext.c
-@@ -186,6 +186,19 @@ EbErrorType copy_configuration_parameters(EbConfig *config, EbAppContext *callba
-     callback_data->eb_enc_parameters.target_socket             = config->target_socket;
-     callback_data->eb_enc_parameters.unrestricted_motion_vector =
-         config->unrestricted_motion_vector;
-+
+@@ -206,6 +206,18 @@ EbErrorType copy_configuration_parameters(EbConfig *config, EbAppContext *callba
+     callback_data->eb_enc_parameters.superres_qthres = config->superres_qthres;
+     // --- end: SUPER-RESOLUTION SUPPORT
+ 
 +    if ((config->thread_count > 0) && (config->thread_count < EB_THREAD_COUNT_MIN_CORE * EB_THREAD_COUNT_FACTOR)) {
 +        callback_data->eb_enc_parameters.thread_count = EB_THREAD_COUNT_MIN_CORE * EB_THREAD_COUNT_FACTOR;
 +        printf("\nWarning: the thread count %u is set too small and is forced to the min value %u\n",
 +                config->thread_count, callback_data->eb_enc_parameters.thread_count);
 +    } else {
 +        callback_data->eb_enc_parameters.thread_count = (config->thread_count + EB_THREAD_COUNT_MIN_CORE - 1)
-+                                                       / EB_THREAD_COUNT_MIN_CORE * EB_THREAD_COUNT_MIN_CORE;
++                                                        / EB_THREAD_COUNT_MIN_CORE * EB_THREAD_COUNT_MIN_CORE;
 +        if (callback_data->eb_enc_parameters.thread_count != config->thread_count)
 +            printf("\nInformation: the thread count %u is rounded to %u\n",
 +                    config->thread_count, callback_data->eb_enc_parameters.thread_count);
 +    }
 +
-     callback_data->eb_enc_parameters.recon_enabled = config->recon_file ? EB_TRUE : EB_FALSE;
-     // --- start: ALTREF_FILTERING_SUPPORT
-     callback_data->eb_enc_parameters.enable_altrefs  = (EbBool)config->enable_altrefs;
+     for (hme_region_index = 0;
+          hme_region_index < callback_data->eb_enc_parameters.number_hme_search_region_in_width;
+          ++hme_region_index) {
 diff --git a/Source/Lib/Encoder/Globals/EbEncHandle.c b/Source/Lib/Encoder/Globals/EbEncHandle.c
-index c143937c..b279b424 100644
+index 26d059ac..a54666ef 100644
 --- a/Source/Lib/Encoder/Globals/EbEncHandle.c
 +++ b/Source/Lib/Encoder/Globals/EbEncHandle.c
-@@ -388,6 +388,10 @@ EbErrorType load_default_buffer_configuration_settings(
- 
+@@ -392,6 +392,8 @@ EbErrorType load_default_buffer_configuration_settings(
+ #endif
      unsigned int lp_count   = get_num_processors();
      unsigned int core_count = lp_count;
-+
 +    unsigned int total_thread_count;
 +    unsigned int thread_unit;
-+
  #if defined(_WIN32) || defined(__linux__)
      if (scs_ptr->static_config.target_socket != -1)
          core_count /= num_groups;
-@@ -409,6 +413,24 @@ EbErrorType load_default_buffer_configuration_settings(
+@@ -413,6 +415,22 @@ EbErrorType load_default_buffer_configuration_settings(
          scs_ptr->static_config.logical_processors > lp_count / num_groups)
          core_count = lp_count;
  #endif
-+
 +    // Thread count computation
 +    if (scs_ptr->static_config.thread_count != 0)
 +        total_thread_count = scs_ptr->static_config.thread_count;
@@ -163,11 +159,10 @@ index c143937c..b279b424 100644
 +                             / EB_THREAD_COUNT_MIN_CORE * EB_THREAD_COUNT_MIN_CORE;
 +    }
 +    thread_unit = total_thread_count / EB_THREAD_COUNT_MIN_CORE;
-+
      int32_t return_ppcs = set_parent_pcs(&scs_ptr->static_config,
                      core_count, scs_ptr->input_resolution);
      if (return_ppcs == -1)
-@@ -591,17 +613,17 @@ EbErrorType load_default_buffer_configuration_settings(
+@@ -613,17 +631,17 @@ EbErrorType load_default_buffer_configuration_settings(
      scs_ptr->cdef_fifo_init_count                        = 300;
      scs_ptr->rest_fifo_init_count                        = 300;
      //#====================== Processes number ======================
@@ -195,7 +190,7 @@ index c143937c..b279b424 100644
      }else{
          scs_ptr->total_process_init_count += (scs_ptr->picture_analysis_process_init_count            = 1);
          scs_ptr->total_process_init_count += (scs_ptr->motion_estimation_process_init_count           = 1);
-@@ -614,7 +636,6 @@ EbErrorType load_default_buffer_configuration_settings(
+@@ -636,7 +654,6 @@ EbErrorType load_default_buffer_configuration_settings(
          scs_ptr->total_process_init_count += (scs_ptr->rest_process_init_count                        = 1);
      }
  
@@ -204,117 +199,114 @@ index c143937c..b279b424 100644
  
      /******************************************************************
 diff --git a/ffmpeg_plugin/0001-Add-ability-for-ffmpeg-to-run-svt-av1-with-svt-hevc.patch b/ffmpeg_plugin/0001-Add-ability-for-ffmpeg-to-run-svt-av1-with-svt-hevc.patch
-index f4fa39f5..6d1ad4d0 100644
+index fb127d70..8a1f00f9 100644
 --- a/ffmpeg_plugin/0001-Add-ability-for-ffmpeg-to-run-svt-av1-with-svt-hevc.patch
 +++ b/ffmpeg_plugin/0001-Add-ability-for-ffmpeg-to-run-svt-av1-with-svt-hevc.patch
-@@ -1,6 +1,6 @@
--From 6c6b0bccb7899c4637f8d05b4aae279d7661b715 Mon Sep 17 00:00:00 2001
--From: Daryl Seah <daryl.seah@intel.com>
--Date: Fri, 18 Jan 2019 02:11:38 +0000
-+From 783b86836cfcbd7c429254efd2b5424e9e9fc367 Mon Sep 17 00:00:00 2001
-+From: Zhizhen Tang <zhizhen.tang@intel.com>
-+Date: Thu, 20 Feb 2020 10:36:47 +0800
- Subject: [PATCH] Add ability for ffmpeg to run svt-av1 with svt-hevc
+@@ -1,7 +1,7 @@
+ From f9f92b64daa8b6d4cf5d070d41702da1e6de5ee2 Mon Sep 17 00:00:00 2001
+ From: Daryl Seah <daryl.seah@intel.com>
+ Date: Fri, 18 Jan 2019 02:11:38 +0000
+-Subject: [PATCH 2/2] Add ability for ffmpeg to run svt-av1 with svt-hevc
++Subject: [PATCH] Add ability for ffmpeg to run svt-av1 with svt-hevc
  
  Change-Id: I37ee5414fdd99e0b3f112a6e5ede166f3e48d819
+ Signed-off-by: Daryl Seah <daryl.seah@intel.com>
 @@ -13,15 +13,15 @@ Signed-off-by: Xu Guangxin <guangxin.xu@intel.com>
   configure               |   4 +
   libavcodec/Makefile     |   1 +
   libavcodec/allcodecs.c  |   1 +
-- libavcodec/libsvt_av1.c | 528 ++++++++++++++++++++++++++++++++++++++++
-- 4 files changed, 534 insertions(+)
-+ libavcodec/libsvt_av1.c | 546 ++++++++++++++++++++++++++++++++++++++++
-+ 4 files changed, 552 insertions(+)
+- libavcodec/libsvt_av1.c | 548 ++++++++++++++++++++++++++++++++++++++++
+- 4 files changed, 554 insertions(+)
++ libavcodec/libsvt_av1.c | 565 ++++++++++++++++++++++++++++++++++++++++
++ 4 files changed, 571 insertions(+)
   create mode 100644 libavcodec/libsvt_av1.c
  
  diff --git a/configure b/configure
--index d654be5d72..7aa44c3d10 100755
-+index dc5f74f..3e98046 100755
+-index 03427b2bb6..532dd80584 100755
++index dc5f74f..20717c7 100755
  --- a/configure
  +++ b/configure
--@@ -266,6 +266,7 @@ External library support:
+-@@ -268,6 +268,7 @@ External library support:
 +@@ -265,6 +265,7 @@ External library support:
     --enable-libsrt          enable Haivision SRT protocol via libsrt [no]
     --enable-libssh          enable SFTP protocol via libssh [no]
     --enable-libsvthevc      enable HEVC encoding via svt [no]
-@@ -29,7 +29,7 @@ index d654be5d72..7aa44c3d10 100755
+@@ -29,7 +29,7 @@ index 03427b2bb6..532dd80584 100755
     --enable-libtensorflow   enable TensorFlow as a DNN module backend
                              for DNN based filters like sr [no]
     --enable-libtesseract    enable Tesseract, needed for ocr filter [no]
--@@ -1797,6 +1798,7 @@ EXTERNAL_LIBRARY_LIST="
+-@@ -1803,6 +1804,7 @@ EXTERNAL_LIBRARY_LIST="
 +@@ -1795,6 +1796,7 @@ EXTERNAL_LIBRARY_LIST="
       libsrt
       libssh
       libsvthevc
-@@ -37,7 +37,7 @@ index d654be5d72..7aa44c3d10 100755
+@@ -37,7 +37,7 @@ index 03427b2bb6..532dd80584 100755
       libtensorflow
       libtesseract
       libtheora
--@@ -3217,6 +3219,7 @@ libspeex_decoder_deps="libspeex"
+-@@ -3233,6 +3235,7 @@ libspeex_decoder_deps="libspeex"
 +@@ -3194,6 +3196,7 @@ libspeex_decoder_deps="libspeex"
   libspeex_encoder_deps="libspeex"
   libspeex_encoder_select="audio_frame_queue"
   libsvt_hevc_encoder_deps="libsvthevc"
-@@ -45,7 +45,7 @@ index d654be5d72..7aa44c3d10 100755
+@@ -45,7 +45,7 @@ index 03427b2bb6..532dd80584 100755
   libtheora_encoder_deps="libtheora"
   libtwolame_encoder_deps="libtwolame"
   libvo_amrwbenc_encoder_deps="libvo_amrwbenc"
--@@ -6311,6 +6314,7 @@ enabled libssh            && require_pkg_config libssh libssh libssh/sftp.h sftp
+-@@ -6357,6 +6360,7 @@ enabled libssh            && require_pkg_config libssh libssh libssh/sftp.h sftp
 +@@ -6267,6 +6270,7 @@ enabled libssh            && require_pkg_config libssh libssh libssh/sftp.h sftp
   enabled libspeex          && require_pkg_config libspeex speex speex/speex.h speex_decoder_init
   enabled libsrt            && require_pkg_config libsrt "srt >= 1.3.0" srt/srt.h srt_socket
   enabled libsvthevc        && require_pkg_config libsvthevc SvtHevcEnc EbApi.h EbInitHandle
-@@ -54,10 +54,10 @@ index d654be5d72..7aa44c3d10 100755
+@@ -54,10 +54,10 @@ index 03427b2bb6..532dd80584 100755
   enabled libtesseract      && require_pkg_config libtesseract tesseract tesseract/capi.h TessBaseAPICreate
   enabled libtheora         && require libtheora theora/theoraenc.h th_info_init -ltheoraenc -ltheoradec -logg
  diff --git a/libavcodec/Makefile b/libavcodec/Makefile
--index 309dd77d3d..0fe1ded6fc 100644
+-index fc930e7338..a10b8fb56b 100644
 +index d39f568..c500f3d 100644
  --- a/libavcodec/Makefile
  +++ b/libavcodec/Makefile
--@@ -998,6 +998,7 @@ OBJS-$(CONFIG_LIBSHINE_ENCODER)           += libshine.o
+-@@ -1013,6 +1013,7 @@ OBJS-$(CONFIG_LIBSHINE_ENCODER)           += libshine.o
 +@@ -992,6 +992,7 @@ OBJS-$(CONFIG_LIBSHINE_ENCODER)           += libshine.o
   OBJS-$(CONFIG_LIBSPEEX_DECODER)           += libspeexdec.o
   OBJS-$(CONFIG_LIBSPEEX_ENCODER)           += libspeexenc.o
   OBJS-$(CONFIG_LIBSVT_HEVC_ENCODER)        += libsvt_hevc.o
-@@ -66,10 +66,10 @@ index 309dd77d3d..0fe1ded6fc 100644
+@@ -66,10 +66,10 @@ index fc930e7338..a10b8fb56b 100644
   OBJS-$(CONFIG_LIBTWOLAME_ENCODER)         += libtwolame.o
   OBJS-$(CONFIG_LIBVO_AMRWBENC_ENCODER)     += libvo-amrwbenc.o
  diff --git a/libavcodec/allcodecs.c b/libavcodec/allcodecs.c
--index a8ef8fb3b1..99a6a0b326 100644
+-index bf951528d0..309168850d 100644
 +index d8788a7..db1b1b2 100644
  --- a/libavcodec/allcodecs.c
  +++ b/libavcodec/allcodecs.c
--@@ -710,6 +710,7 @@ extern AVCodec ff_libshine_encoder;
+-@@ -722,6 +722,7 @@ extern AVCodec ff_libshine_encoder;
 +@@ -708,6 +708,7 @@ extern AVCodec ff_libshine_encoder;
   extern AVCodec ff_libspeex_encoder;
   extern AVCodec ff_libspeex_decoder;
   extern AVCodec ff_libsvt_hevc_encoder;
-@@ -79,10 +79,10 @@ index a8ef8fb3b1..99a6a0b326 100644
+@@ -79,10 +79,10 @@ index bf951528d0..309168850d 100644
   extern AVCodec ff_libvo_amrwbenc_encoder;
  diff --git a/libavcodec/libsvt_av1.c b/libavcodec/libsvt_av1.c
  new file mode 100644
--index 0000000000..4984816830
-+index 0000000..af991af
+-index 0000000000..5f1d8e033f
++index 0000000..6af483a
  --- /dev/null
  +++ b/libavcodec/libsvt_av1.c
--@@ -0,0 +1,528 @@
-+@@ -0,0 +1,546 @@
+-@@ -0,0 +1,548 @@
++@@ -0,0 +1,565 @@
  +/*
  +* Scalable Video Technology for AV1 encoder library plugin
  +*
-@@ -150,8 +150,9 @@ index 0000000000..4984816830
- +    int tier;
+@@ -152,7 +152,7 @@ index 0000000000..5f1d8e033f
  +    int level;
  +    int profile;
+ +
 -+
-++    
- +    int base_layer_switch_mode;
 ++    int thread_count;
  +} SvtContext;
  +
  +static const struct {
-@@ -312,6 +313,20 @@ index 0000000000..4984816830
+@@ -308,6 +308,20 @@ index 0000000000..5f1d8e033f
  +    if (svt_enc->la_depth != -1)
  +        param->look_ahead_distance  = svt_enc->la_depth;
  +
@@ -335,7 +327,7 @@ index f4fa39f5..6d1ad4d0 100644
  +    return 0;
  +}
  +
-@@ -574,6 +589,9 @@ index 0000000000..4984816830
+@@ -594,6 +608,9 @@ index 0000000000..5f1d8e033f
  +    { "forced-idr", "If forcing keyframes, force them as IDR frames.", OFFSET(forced_idr),
  +      AV_OPT_TYPE_BOOL,   { .i64 = 0 }, 0, 1, VE },
  +
@@ -345,7 +337,7 @@ index f4fa39f5..6d1ad4d0 100644
  +    {NULL},
  +};
  +
-@@ -602,7 +620,7 @@ index 0000000000..4984816830
+@@ -622,7 +639,7 @@ index 0000000000..5f1d8e033f
  +    .send_frame     = eb_send_frame,
  +    .receive_packet = eb_receive_packet,
  +    .close          = eb_enc_close,
@@ -354,123 +346,115 @@ index f4fa39f5..6d1ad4d0 100644
  +    .pix_fmts       = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P,
  +                                                    AV_PIX_FMT_YUV420P10,
  +                                                    AV_PIX_FMT_NONE },
-@@ -611,5 +629,6 @@ index 0000000000..4984816830
+@@ -631,5 +648,6 @@ index 0000000000..5f1d8e033f
  +    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
  +    .wrapper_name   = "libsvt_av1",
  +};
 ---
+-2.17.1
 +-- 
- 2.17.1
++2.20.1
 +
 diff --git a/ffmpeg_plugin/0001-Add-ability-for-ffmpeg-to-run-svt-av1.patch b/ffmpeg_plugin/0001-Add-ability-for-ffmpeg-to-run-svt-av1.patch
-index 078d501a..edbdcf8c 100644
+index f56693c7..941cf8a2 100644
 --- a/ffmpeg_plugin/0001-Add-ability-for-ffmpeg-to-run-svt-av1.patch
 +++ b/ffmpeg_plugin/0001-Add-ability-for-ffmpeg-to-run-svt-av1.patch
-@@ -1,6 +1,6 @@
--From c266759a5f107d9ebd618dbf61fa52221b1e5f22 Mon Sep 17 00:00:00 2001
--From: Daryl Seah <daryl.seah@intel.com>
--Date: Fri, 18 Jan 2019 02:11:38 +0000
-+From 6ba4cdff01c937a05598b07afc60a409e79a7d54 Mon Sep 17 00:00:00 2001
-+From: Zhizhen Tang <zhizhen.tang@intel.com>
-+Date: Thu, 20 Feb 2020 10:24:56 +0800
- Subject: [PATCH] Add ability for ffmpeg to run svt-av1
- 
- Change-Id: I37ee5414fdd99e0b3f112a6e5ede166f3e48d819
 @@ -13,15 +13,15 @@ Signed-off-by: Xu Guangxin <guangxin.xu@intel.com>
   configure               |   4 +
   libavcodec/Makefile     |   1 +
   libavcodec/allcodecs.c  |   1 +
-- libavcodec/libsvt_av1.c | 528 ++++++++++++++++++++++++++++++++++++++++
-- 4 files changed, 534 insertions(+)
-+ libavcodec/libsvt_av1.c | 546 ++++++++++++++++++++++++++++++++++++++++
-+ 4 files changed, 552 insertions(+)
+- libavcodec/libsvt_av1.c | 548 ++++++++++++++++++++++++++++++++++++++++
+- 4 files changed, 554 insertions(+)
++ libavcodec/libsvt_av1.c | 565 ++++++++++++++++++++++++++++++++++++++++
++ 4 files changed, 571 insertions(+)
   create mode 100644 libavcodec/libsvt_av1.c
  
  diff --git a/configure b/configure
--index 8f4f2884cf..d2ffecc9f6 100755
-+index 34c2adb..e05f3a5 100755
+-index 6533b43250..7978e0ebdb 100755
++index 34c2adb..e157558 100755
  --- a/configure
  +++ b/configure
--@@ -265,6 +265,7 @@ External library support:
+-@@ -267,6 +267,7 @@ External library support:
 +@@ -264,6 +264,7 @@ External library support:
     --enable-libspeex        enable Speex de/encoding via libspeex [no]
     --enable-libsrt          enable Haivision SRT protocol via libsrt [no]
     --enable-libssh          enable SFTP protocol via libssh [no]
-@@ -29,7 +29,7 @@ index 8f4f2884cf..d2ffecc9f6 100755
+@@ -29,7 +29,7 @@ index 6533b43250..7978e0ebdb 100755
     --enable-libtensorflow   enable TensorFlow as a DNN module backend
                              for DNN based filters like sr [no]
     --enable-libtesseract    enable Tesseract, needed for ocr filter [no]
--@@ -1795,6 +1796,7 @@ EXTERNAL_LIBRARY_LIST="
+-@@ -1801,6 +1802,7 @@ EXTERNAL_LIBRARY_LIST="
 +@@ -1793,6 +1794,7 @@ EXTERNAL_LIBRARY_LIST="
       libspeex
       libsrt
       libssh
-@@ -37,7 +37,7 @@ index 8f4f2884cf..d2ffecc9f6 100755
+@@ -37,7 +37,7 @@ index 6533b43250..7978e0ebdb 100755
       libtensorflow
       libtesseract
       libtheora
--@@ -3214,6 +3216,7 @@ libshine_encoder_select="audio_frame_queue"
+-@@ -3230,6 +3232,7 @@ libshine_encoder_select="audio_frame_queue"
 +@@ -3191,6 +3193,7 @@ libshine_encoder_select="audio_frame_queue"
   libspeex_decoder_deps="libspeex"
   libspeex_encoder_deps="libspeex"
   libspeex_encoder_select="audio_frame_queue"
-@@ -45,7 +45,7 @@ index 8f4f2884cf..d2ffecc9f6 100755
+@@ -45,7 +45,7 @@ index 6533b43250..7978e0ebdb 100755
   libtheora_encoder_deps="libtheora"
   libtwolame_encoder_deps="libtwolame"
   libvo_amrwbenc_encoder_deps="libvo_amrwbenc"
--@@ -6307,6 +6310,7 @@ enabled libsoxr           && require libsoxr soxr.h soxr_create -lsoxr
+-@@ -6353,6 +6356,7 @@ enabled libsoxr           && require libsoxr soxr.h soxr_create -lsoxr
 +@@ -6263,6 +6266,7 @@ enabled libsoxr           && require libsoxr soxr.h soxr_create -lsoxr
   enabled libssh            && require_pkg_config libssh libssh libssh/sftp.h sftp_init
   enabled libspeex          && require_pkg_config libspeex speex speex/speex.h speex_decoder_init
   enabled libsrt            && require_pkg_config libsrt "srt >= 1.3.0" srt/srt.h srt_socket
-@@ -54,10 +54,10 @@ index 8f4f2884cf..d2ffecc9f6 100755
+@@ -54,10 +54,10 @@ index 6533b43250..7978e0ebdb 100755
   enabled libtesseract      && require_pkg_config libtesseract tesseract tesseract/capi.h TessBaseAPICreate
   enabled libtheora         && require libtheora theora/theoraenc.h th_info_init -ltheoraenc -ltheoradec -logg
  diff --git a/libavcodec/Makefile b/libavcodec/Makefile
--index 006a472a6d..05d8e2e9c0 100644
+-index 88944d9a3a..9c54543701 100644
 +index 3cd73fb..5db4565 100644
  --- a/libavcodec/Makefile
  +++ b/libavcodec/Makefile
--@@ -997,6 +997,7 @@ OBJS-$(CONFIG_LIBRAV1E_ENCODER)           += librav1e.o
+-@@ -1012,6 +1012,7 @@ OBJS-$(CONFIG_LIBRAV1E_ENCODER)           += librav1e.o
 +@@ -991,6 +991,7 @@ OBJS-$(CONFIG_LIBOPUS_ENCODER)            += libopusenc.o libopus.o     \
   OBJS-$(CONFIG_LIBSHINE_ENCODER)           += libshine.o
   OBJS-$(CONFIG_LIBSPEEX_DECODER)           += libspeexdec.o
   OBJS-$(CONFIG_LIBSPEEX_ENCODER)           += libspeexenc.o
-@@ -66,10 +66,10 @@ index 006a472a6d..05d8e2e9c0 100644
+@@ -66,10 +66,10 @@ index 88944d9a3a..9c54543701 100644
   OBJS-$(CONFIG_LIBTWOLAME_ENCODER)         += libtwolame.o
   OBJS-$(CONFIG_LIBVO_AMRWBENC_ENCODER)     += libvo-amrwbenc.o
  diff --git a/libavcodec/allcodecs.c b/libavcodec/allcodecs.c
--index 0c0741936c..681ae8f67d 100644
+-index e7b29426db..c495ea29bc 100644
 +index d2f9a39..75759c7 100644
  --- a/libavcodec/allcodecs.c
  +++ b/libavcodec/allcodecs.c
--@@ -709,6 +709,7 @@ extern AVCodec ff_librsvg_decoder;
+-@@ -721,6 +721,7 @@ extern AVCodec ff_librsvg_decoder;
 +@@ -707,6 +707,7 @@ extern AVCodec ff_librsvg_decoder;
   extern AVCodec ff_libshine_encoder;
   extern AVCodec ff_libspeex_encoder;
   extern AVCodec ff_libspeex_decoder;
-@@ -79,10 +79,10 @@ index 0c0741936c..681ae8f67d 100644
+@@ -79,10 +79,10 @@ index e7b29426db..c495ea29bc 100644
   extern AVCodec ff_libvo_amrwbenc_encoder;
  diff --git a/libavcodec/libsvt_av1.c b/libavcodec/libsvt_av1.c
  new file mode 100644
--index 0000000000..4984816830
-+index 0000000..03cb380
+-index 0000000000..5f1d8e033f
++index 0000000..6af483a
  --- /dev/null
  +++ b/libavcodec/libsvt_av1.c
--@@ -0,0 +1,528 @@
-+@@ -0,0 +1,546 @@
+-@@ -0,0 +1,548 @@
++@@ -0,0 +1,565 @@
  +/*
  +* Scalable Video Technology for AV1 encoder library plugin
  +*
-@@ -152,6 +152,7 @@ index 0000000000..4984816830
+@@ -152,7 +152,7 @@ index 0000000000..5f1d8e033f
+ +    int level;
  +    int profile;
  +
- +    int base_layer_switch_mode;
+-+
 ++    int thread_count;
  +} SvtContext;
  +
  +static const struct {
-@@ -312,6 +313,20 @@ index 0000000000..4984816830
+@@ -308,6 +308,20 @@ index 0000000000..5f1d8e033f
  +    if (svt_enc->la_depth != -1)
  +        param->look_ahead_distance  = svt_enc->la_depth;
  +
@@ -491,7 +475,7 @@ index 078d501a..edbdcf8c 100644
  +    return 0;
  +}
  +
-@@ -574,6 +589,9 @@ index 0000000000..4984816830
+@@ -594,6 +608,9 @@ index 0000000000..5f1d8e033f
  +    { "forced-idr", "If forcing keyframes, force them as IDR frames.", OFFSET(forced_idr),
  +      AV_OPT_TYPE_BOOL,   { .i64 = 0 }, 0, 1, VE },
  +
@@ -501,7 +485,7 @@ index 078d501a..edbdcf8c 100644
  +    {NULL},
  +};
  +
-@@ -602,7 +620,7 @@ index 0000000000..4984816830
+@@ -622,7 +639,7 @@ index 0000000000..5f1d8e033f
  +    .send_frame     = eb_send_frame,
  +    .receive_packet = eb_receive_packet,
  +    .close          = eb_enc_close,
@@ -510,14 +494,15 @@ index 078d501a..edbdcf8c 100644
  +    .pix_fmts       = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P,
  +                                                    AV_PIX_FMT_YUV420P10,
  +                                                    AV_PIX_FMT_NONE },
-@@ -611,5 +629,6 @@ index 0000000000..4984816830
+@@ -631,5 +648,6 @@ index 0000000000..5f1d8e033f
  +    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
  +    .wrapper_name   = "libsvt_av1",
  +};
 ---
+-2.17.1
 +-- 
- 2.17.1
++2.20.1
 +
 -- 
-2.17.1
+2.20.1
 

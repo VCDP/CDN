@@ -1,4 +1,4 @@
 # Patches for CDN-Transcode-Sample
-## FFmpeg
-## Nginx
-## SVT
+- FFmpeg
+- Nginx
+- SVT

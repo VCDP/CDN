@@ -1,4 +1,4 @@
 # Patches for CDN-Transcode-Sample
-- FFmpeg
+- FFmpeg4.4
 - Nginx
 - SVT

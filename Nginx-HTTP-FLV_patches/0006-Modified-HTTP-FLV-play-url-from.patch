@@ -1,0 +1,97 @@
+From 8249a603746eb23604716f34db2f5e9c8dc2951d Mon Sep 17 00:00:00 2001
+From: Zhizhen Tang <zhizhen.tang@intel.com>
+Date: Tue, 21 Nov 2023 22:46:39 +0800
+Subject: [PATCH] Modified HTTP-FLV play url from
+ http://example.com[:port]/dir?[port=xxx&]app=appname&stream=streamname to
+ http://example.com[:port]/appname/streamname.flv
+
+---
+ ngx_http_flv_live_module.c | 40 ++++++++++++++++++++++++++++++--------
+ 1 file changed, 32 insertions(+), 8 deletions(-)
+
+diff --git a/ngx_http_flv_live_module.c b/ngx_http_flv_live_module.c
+index 5c4a56e..604ccfd 100644
+--- a/ngx_http_flv_live_module.c
++++ b/ngx_http_flv_live_module.c
+@@ -10,6 +10,9 @@
+ #include "ngx_rtmp_bandwidth.h"
+ 
+ 
++#define NGX_URI_LEN             100
++#define ngx_string1(str)        { strlen(str), (u_char *) str }
++
+ static ngx_rtmp_play_pt         next_play;
+ static ngx_rtmp_close_stream_pt next_close_stream;
+ 
+@@ -1693,13 +1696,13 @@ ngx_http_flv_live_preprocess(ngx_http_request_t *r,
+ 
+     ngx_rtmp_port_t             *rport;
+ 
+-    ngx_str_t                    arg_app = ngx_string("app");
+-    ngx_str_t                    arg_stream = ngx_string("stream");
+     ngx_str_t                    arg_port = ngx_string("port");
+     ngx_int_t                    in_port;
+     ngx_uint_t                   i, n;
+     ngx_flag_t                   port_match, addr_match;
+     unsigned short               sa_family;
++    size_t                       lens = 0, j = 0;
++    char                         uri[NGX_URI_LEN] = {};
+ 
+     ctx = ngx_http_get_module_ctx(r, ngx_http_flv_live_module);
+ 
+@@ -1711,6 +1714,15 @@ ngx_http_flv_live_preprocess(ngx_http_request_t *r,
+         ngx_http_split_args(r, &r->uri, &r->args);
+     }
+ 
++    if (r->exten.len != 0 && r->uri.len > r->exten.len) {
++        lens = r->uri.len - r->exten.len - 1;
++    }
++
++    for (j = 0; j < lens; j++)
++    {
++       uri[j] = *(r->uri.data + j);
++    }
++
+     if (ngx_http_arg(r, arg_port.data, arg_port.len, &ctx->port) != NGX_OK) {
+         /* no port in args */
+         ctx->port.len = ngx_strlen("1935");
+@@ -1871,18 +1883,30 @@ ngx_http_flv_live_preprocess(ngx_http_request_t *r,
+         return NGX_ERROR;
+     }
+ 
+-    if (ngx_http_arg(r, arg_app.data, arg_app.len, &ctx->app) != NGX_OK) {
++    char *p = strtok(uri, "/");
++    if (p != NULL) {
++        ngx_str_t arg_app = ngx_string1(p);
++
++        ctx->app.data = arg_app.data;
++        ctx->app.len = arg_app.len;
++    } else {
+         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                       "flv live: app args MUST be specified");
+ 
+         return NGX_ERROR;
+     }
+ 
+-    if (ngx_http_arg(r, arg_stream.data, arg_stream.len,
+-                     &ctx->stream) != NGX_OK)
+-    {
+-        ctx->stream.data = (u_char *) "";
+-        ctx->stream.len = 0;
++    p = strtok(NULL, "/");
++    if (p != NULL) {
++       ngx_str_t arg_stream = ngx_string1(p);
++
++       ctx->stream.data = arg_stream.data;
++       ctx->stream.len = arg_stream.len;
++    } else {
++        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
++                      "flv live: stream args MUST be specified");
++
++        return NGX_ERROR;
+     }
+ 
+     return NGX_OK;
+-- 
+2.25.1
+
